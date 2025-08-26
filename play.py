@@ -1,7 +1,7 @@
 import argparse
 import torch
 import os
-from agent.py import Agent
+from agent import Agent
 
 class Config(object):
     def __init__(self, args):
