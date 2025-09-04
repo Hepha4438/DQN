@@ -32,7 +32,7 @@ if __name__ == '__main__':
     parser.add_argument("--width", type=int, default=84)
     parser.add_argument("--height", type=int, default=84)
     parser.add_argument("--history", type=int, default=4)
-    parser.add_argument("--mem_capacity", type=int, default=1000000)
+    parser.add_argument("--mem_capacity", type=int, default=100000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--train_freq", type=int, default=4)
     parser.add_argument("--update_freq", type=int, default=10000)
@@ -41,10 +41,14 @@ if __name__ == '__main__':
     parser.add_argument("--ep_end", type=float, default=0.1)
     parser.add_argument("--models_dir", type=str, default="models(1)",
                         help="Directory containing trained models")
-    parser.add_argument("--num_ep", type=int, default=75,
+    parser.add_argument("--num_ep", type=int, default=100,
                         help="Number of episodes to play per model")
-    parser.add_argument("--result_file", type=str, default="results.txt",
+    parser.add_argument("--result_file", type=str, default="results_play_save.txt",
                         help="File to save evaluation results")
+    parser.add_argument("--save_mem_capacity", type=int, default=100000,
+                        help="Capacity for the saved replay buffer during play (default 100k)")
+    parser.add_argument("--save_dir", type=str, default="play_experiences",
+                        help="Directory to save experiences (.npz files)")
 
     args = parser.parse_args()
     conf = Config(args)
@@ -66,21 +70,24 @@ if __name__ == '__main__':
         model_path = os.path.join(args.models_dir, model_file)
         print(f"\nEvaluating {model_file} ...")
 
-        stats = agent.play(model_path=model_path, num_ep=args.num_ep)
+        stats = agent.play_save_mode(
+            model_path=model_path,
+            num_ep=args.num_ep,
+            save_mem_capacity=args.save_mem_capacity,
+            save_dir=args.save_dir
+        )
         results.append((model_file, stats))
 
     # Tính độ rộng cột tên model (ít nhất 20 ký tự cho đẹp)
     name_w = max(20, len("Model"), max(len(m) for m, _ in results))
     col_w = 10  # độ rộng các cột số
 
-    # Tạo format string cho header và từng dòng dữ liệu
     header_fmt = f"{{:<{name_w}}}  {{:>{col_w}}}  {{:>{col_w}}}  {{:>{col_w}}}  {{:>{col_w}}}"
     row_fmt    = f"{{:<{name_w}}}  {{:>{col_w}.2f}}  {{:>{col_w}.2f}}  {{:>{col_w}.2f}}  {{:>{col_w}.2f}}"
 
     header_line = header_fmt.format("Model", "Best", "Average", "Median", "Std")
     sep_line = "-" * len(header_line)
 
-    # In ra console cho đẹp
     print("\n" + header_line)
     print(sep_line)
     for model_name, stats in results:
@@ -88,7 +95,7 @@ if __name__ == '__main__':
 
     # Lưu kết quả ra file
     with open(args.result_file, "w") as f:
-        f.write("Model\tBest\tAverage\tMedian\tStd\n")
+        f.write("Model\tBest\tAverage\tMedian\tStd\tExperienceFile\n")
         for model_name, stats in results:
             f.write(f"{model_name}\t"
                     f"{stats['best']:.2f}\t"

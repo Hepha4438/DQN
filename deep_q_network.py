@@ -34,7 +34,7 @@ class DQN(nn.Module):
 
     def forward(self, x):
         # x: [B, C=num_history, H, W], dtype float32
-        x = x.float() / 255.0  # normalize input ảnh
+        x = x.float()
         x = self._forward_conv(x)
         x = torch.flatten(x, 1)  # [B, -1]
         x = F.relu(self.fc4(x))

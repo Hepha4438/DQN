@@ -3,6 +3,7 @@ import torch
 from agent import Agent
 
 
+
 class Config(object):
     def __init__(self, args):
         self.env = args.env
@@ -16,7 +17,6 @@ class Config(object):
         self.learn_start = args.learn_start
         self.ep_start = args.ep_start
         self.ep_end = args.ep_end
-        self.max_steps = args.max_steps
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -35,11 +35,13 @@ if __name__ == '__main__':
     parser.add_argument("--learn_start", type=int, default=50000)
     parser.add_argument("--ep_start", type=float, default=1.0)
     parser.add_argument("--ep_end", type=float, default=0.1)
-    parser.add_argument("--max_steps", type=int, default=50_000_000,
-                        help="Total number of training steps")
+    parser.add_argument("--model_path", type=str, default="models/model_43699999.pt",
+                        help="Path to the trained model")
+    parser.add_argument("--num_ep", type=int, default=200,
+                        help="Number of episodes to play")
 
     args = parser.parse_args()
     conf = Config(args)
 
     agent = Agent(conf)
-    agent.train()
+    agent.play(model_path=args.model_path, num_ep=args.num_ep)

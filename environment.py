@@ -1,23 +1,30 @@
-""" This code is based on https://github.com/devsisters/DQN-tensorflow """
+""" Environment wrapper for Atari, following Nature DQN (Mnih et al., 2015) """
 import gymnasium as gym
 import ale_py
 import numpy as np
 import random
-from skimage import color
-from skimage import transform
+from skimage import color, transform
 
 
 class Environment(object):
-    def __init__(self, name="ALE/Breakout-v5", width=84, height=84, history=4):
-        self._env = gym.make(name, render_mode="rgb_array")  # đổi thành "human" nếu muốn hiển thị
+    def __init__(self, name="ALE/Breakout-v5", width=84, height=84, history=4, frame_skip=4):
+        self._env = gym.make(name, render_mode="rgb_array")
         obs, info = self._env.reset()
+
         self._width = width
         self._height = height
         self._history = history
+        self._frame_skip = frame_skip
+
         self._reward = 0
         self._terminal = True
         self._screen = None
         self._screen_ori = None
+
+        # Action mapping
+        self._action_meanings = self._env.unwrapped.get_action_meanings()
+        self._noop_action = self._action_meanings.index("NOOP") if "NOOP" in self._action_meanings else 0
+        self._fire_action = self._action_meanings.index("FIRE") if "FIRE" in self._action_meanings else None
 
     @property
     def action_size(self):
@@ -35,29 +42,50 @@ class Environment(object):
     def lives(self):
         if hasattr(self._env, "ale"):
             return self._env.ale.lives()
-        return 0  # fallback nếu env không có lives()
+        return 0
 
     def new_random_game(self, force=False):
+        """Reset and perform random number of NOOP actions (1–30)"""
         if self.lives == 0 or force:
             obs, info = self._env.reset()
-        for _ in range(random.randint(0, 29)):
-            self._step(0)
+            if self._fire_action is not None and "FIRE" in self._action_meanings:
+                obs, _, _, _, _ = self._env.step(self._fire_action)
+
+        noops = random.randint(1, 30)
+        for _ in range(noops):
+            self._step(self._noop_action)
+            if self._terminal:
+                obs, info = self._env.reset()
+
         return self._screen, 0, 0, self._terminal
 
     def act(self, action, is_train=True):
-        start_lives = self.lives
         self._step(action)
-        if is_train and start_lives > self.lives:
-            self._reward -= 1
-            self._terminal = True
         return self.state
 
     def _step(self, action):
-        obs, reward, terminated, truncated, info = self._env.step(action)
-        done = terminated or truncated
+        total_reward = 0.0
+        frames = []
+        terminated, truncated = False, False
+
+        for t in range(self._frame_skip):
+            obs, reward, terminated, truncated, info = self._env.step(action)
+            total_reward += reward
+            frames.append(obs)
+            if terminated or truncated:
+                break
+
+        # Max-pool over last two frames
+        if len(frames) >= 2:
+            obs = np.maximum(frames[-2], frames[-1])
+        else:
+            obs = frames[-1]
+
         self._screen_ori = obs
-        self._reward = reward
-        self._terminal = done
+        self._reward = total_reward
+        self._terminal = terminated or truncated
+
+        # Resize + grayscale
         self._screen = transform.resize(obs, [self._height, self._width])
         self._screen = color.rgb2gray(self._screen)
 
@@ -75,12 +103,8 @@ class ReplayMemory(object):
         self._terminals = np.empty(self._capacity, dtype=np.float32)
         self._count = 0
         self._current = 0
-        self._prestat = np.empty(
-            (self._batch_size, self._history, self._height, self._width), dtype=np.float32
-        )
-        self._poststat = np.empty(
-            (self._batch_size, self._history, self._height, self._width), dtype=np.float32
-        )
+        self._prestat = np.empty((self._batch_size, self._history, self._height, self._width), dtype=np.float32)
+        self._poststat = np.empty((self._batch_size, self._history, self._height, self._width), dtype=np.float32)
         print("Replay memory initialized")
 
     def add(self, screen, reward, action, terminal):
@@ -136,22 +160,3 @@ class History(object):
     def add(self, screen):
         self._input[:-1] = self._input[1:]
         self._input[-1] = screen
-
-
-if __name__ == "__main__":
-    env = Environment()
-    hist = History(env)
-    mem = ReplayMemory(env, 1000000, 32)
-    cul_re = 0
-    for i in range(10000):  # fix xrange -> range
-        ac = 0  # hoặc env._env.action_space.sample()
-        sc, re, ter = env.act(ac)
-        mem.add(sc, re, ac, ter)
-        hist.add(sc)
-        if env.lives == 0:
-            print("reset")
-            env._env.reset()
-            cul_re = 0
-        if re > 0:
-            cul_re += re
-            print(cul_re, ter, env.lives)
