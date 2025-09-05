@@ -1,3 +1,4 @@
+"""Resume training with experiences and a model"""
 import argparse
 import torch
 from agent import Agent
@@ -25,7 +26,7 @@ if __name__ == '__main__':
     parser.add_argument("--width", type=int, default=84)
     parser.add_argument("--height", type=int, default=84)
     parser.add_argument("--history", type=int, default=4)
-    parser.add_argument("--mem_capacity", type=int, default=200000)
+    parser.add_argument("--mem_capacity", type=int, default=500000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--train_freq", type=int, default=4)
     parser.add_argument("--update_freq", type=int, default=10000)
@@ -33,8 +34,8 @@ if __name__ == '__main__':
     parser.add_argument("--ep_start", type=float, default=1.0)
     parser.add_argument("--ep_end", type=float, default=0.1)
     parser.add_argument("--max_steps", type=int, default=50_000_000)
-    parser.add_argument("--resume_model_path", type=str, default="models(1)/model_37199999.pt")
-    parser.add_argument("--buffer_dir", type=str, default="play_experiences")
+    parser.add_argument("--resume_model_path", type=str, default=None)
+    parser.add_argument("--buffer_dir", type=str, default="train_experiences")
 
     args = parser.parse_args()
     conf = Config(args)

@@ -46,49 +46,123 @@ class Agent(object):
 
         self.optim = torch.optim.RMSprop(self.q.parameters(), lr=0.00025, alpha=0.95, eps=0.01)
 
-    def train(self):
+    def _reset_and_fill_history(self, target_lives=5):
+        # 1. Reset game KHÔNG tự FIRE trong Environment
         screen, reward, action, terminal = self.env.new_random_game(force=True)
+
+        # 2. Reset history ngay lập tức, điền frame tĩnh
+        _ = self.hist.reset
         for _ in range(self.env._history):
             self.hist.add(screen)
 
+        # 3. FIRE bóng để bắt đầu game
+        if self.env._fire_action is not None:
+            screen, reward, terminal = self.env.act(self.env._fire_action)
+
+        # 4. Thêm frame hiện tại vào history sau FIRE
+        self.hist.add(screen)
+
+        return screen, reward, self.env._fire_action, terminal
+
+
+    def train(self):
+        # Reset game đầu tiên
+        screen, reward, action, terminal = self._reset_and_fill_history()
+        init_lives = self.env._env.unwrapped.ale.lives()
+
+        # Biến thống kê
         num_game, self.update_count, ep_reward = 0, 0, 0.0
         total_reward, self.total_loss, self.total_q = 0.0, 0.0, 0.0
         ep_rewards, actions = [], []
 
-        for self.step in tqdm(range(self._current_step,self._max_steps), ncols=70, initial=0):
+        # Mở file log append
+        log_path = "training_log.txt"
+        log_file = open(log_path, "a")
+
+        # Tạo thư mục lưu replay buffer
+        replay_dir = "train_experiences"
+        os.makedirs(replay_dir, exist_ok=True)
+
+        # Training loop
+        for self.step in tqdm(range(self._current_step, self._max_steps), ncols=70, initial=0):
             if self.step == self._learn_st:
                 num_game, self.update_count, ep_reward = 0, 0, 0.0
                 total_reward, self.total_loss, self.total_q = 0.0, 0.0, 0.0
                 ep_rewards, actions = [], []
 
+            # 1. chọn action
             action = self._select_action()
+
+            # 2. thực hiện action
             screen, reward, terminal = self.env.act(action)
             self.observe(screen, reward, action, terminal)
 
-            if terminal:
-                screen, reward, action, terminal = self.env.new_random_game()
-                num_game += 1
-                ep_rewards.append(ep_reward)
-                ep_reward = 0.0
-            else:
-                ep_reward += reward
-
-            actions.append(action)
+            # 3. update reward
+            ep_reward += reward
             total_reward += reward
+            actions.append(action)
 
+            # 4. xử lý nếu terminal
+            if terminal:
+                lives = self.env._env.unwrapped.ale.lives()
+
+                if lives > 0:
+                    # chỉ mất 1 mạng → chỉ reset history stack
+                    _ = self.hist.reset
+                    for _ in range(self.env._history):
+                        self.hist.add(screen)
+                else:
+                    # Game over thật sự
+                    num_game += 1
+                    ep_rewards.append(ep_reward)
+                    ep_reward = 0.0
+
+                    # Reset env cho episode mới
+                    screen, reward, action, terminal = self._reset_and_fill_history()
+
+            # 5. logging mỗi 10k bước
             if self.step >= self._learn_st and self.step % 10_000 == 9_999:
                 avg_reward = total_reward / 10_000.0
                 avg_loss = (self.total_loss / max(1, self.update_count))
                 avg_q = (self.total_q / max(1, self.update_count))
-                print(f'# games: {num_game}, reward: {avg_reward}, loss: {avg_loss}, q: {avg_q:.4f}')
+                avg_ep_reward = sum(ep_rewards)/len(ep_rewards) if ep_rewards else 0.0
 
+                log_str = (f'step {self.step}: # games: {num_game}, reward: {avg_reward:.2f}, '
+                           f'loss: {avg_loss:.6f}, q: {avg_q:.4f}, avg_ep_reward: {avg_ep_reward:.2f}')
+
+                print(log_str)
+                log_file.write(log_str + "\n")
+                log_file.flush()  # đảm bảo ghi ra file ngay
+
+                # reset thống kê
                 num_game, total_reward, self.total_loss, self.total_q, self.update_count = 0, 0.0, 0.0, 0.0, 0
                 ep_reward, ep_rewards, actions = 0.0, [], []
+
+                # 6. Lưu replay buffer mỗi 2M bước
+                if self.step >= self._learn_st and self.step % 2_000_000 == 1_999_999:
+                    count = self.mem._count
+                    save_path = os.path.join(replay_dir, f"replay_{self.step}.npz")
+                    np.savez_compressed(
+                        save_path,
+                        actions=self.mem._actions[:count].astype(self.mem._actions.dtype, copy=False),
+                        rewards=self.mem._rewards[:count].astype(self.mem._rewards.dtype, copy=False),
+                        screens=self.mem._screens[:count].astype(self.mem._screens.dtype, copy=False),
+                        terminals=self.mem._terminals[:count].astype(self.mem._terminals.dtype, copy=False),
+                        count=np.int64(count),
+                        history=self.env._history,
+                        height=self.env._height,
+                        width=self.env._width
+                    )
+                    print(f"[ReplayBuffer] Saved replay buffer to {save_path} (count={count})")
+
+        # Đóng file log sau khi train xong
+        log_file.close()
+
 
     def observe(self, screen, reward, action, terminal):
         reward = float(np.clip(reward, -1.0, 1.0))
         self.hist.add(screen)
-        self.mem.add(screen, reward, action, float(terminal))
+        self.mem.add(screen, reward, action, terminal)
 
         if self.step > self._learn_st:
             if self.step % self._tr_freq == 0:
@@ -131,60 +205,34 @@ class Agent(object):
             print(f"[play] full object load failed: {e}")
             raise
 
-    def play(self, model_path, num_ep=10, eval_epsilon=0.05, fire_warmup=8):
+    def play(self, model_path, num_ep=10, eval_epsilon=0.05):
         """
-        - model_path: đường dẫn model đã lưu (có thể là state_dict hoặc full object).
-        - eval_epsilon: epsilon nhỏ khi play để tránh stuck NOOP nếu policy chưa tốt.
-        - fire_warmup: số bước bấm FIRE ở đầu episode (nếu game cần để start).
+        Play với đủ 5 mạng, tránh mất 2 mạng đầu do reset.
         """
+        import random, numpy as np, imageio
+
         # 1) Load model
         self._load_model_checkpoint(model_path)
         self.q.eval()
 
-        # 2) Debug action meanings (nếu ALE expose)
-        try:
-            meanings = self.env._env.unwrapped.get_action_meanings()
-            print("[play] Action meanings:", meanings)
-        except Exception:
-            meanings = None
-
         best_reward = float("-inf")
         best_screen_hist = []
-        rewards = []   # lưu tất cả reward các episode
+        rewards = []
 
         for ep in range(num_ep):
             print(f'# episode: {ep}')
-            _ = self.hist.reset
+            _ = self.hist.reset   # clear history
 
-            # 3) Tạo game mới
-            screen, reward, action, terminal = self.env.new_random_game(force=True)
-            for _ in range(self.env._history):
-                self.hist.add(screen)
-
-            # 4) Ấn FIRE vài frame đầu (nếu có action FIRE)
-            fire_action = None
-            if meanings is not None:
-                for i, m in enumerate(meanings):
-                    if "FIRE" in m:
-                        fire_action = i
-                        break
-
-            if fire_action is not None and fire_warmup > 0:
-                for _ in range(fire_warmup):
-                    screen, r, terminal = self.env.act(fire_action, is_train=False)
-                    self.hist.add(screen)
-                    if terminal:
-                        # Nếu chết ngay, restart
-                        screen, reward, action, terminal = self.env.new_random_game(force=True)
-                        for _ in range(self.env._history):
-                            self.hist.add(screen)
-                        break
+            # Reset game hoàn toàn (5 mạng thật sự)
+            self.env._env.unwrapped.ale.reset_game()
+            screen, reward, action, terminal = self._reset_and_fill_history()
 
             current_reward = 0.0
             current_screen_hist = [self.env.screen]
             action_counts = {}
+            lives = self.env._env.unwrapped.ale.lives()
 
-            # 5) Vòng lặp hành động
+            # Loop cho tới khi hết mạng
             while not terminal:
                 if eval_epsilon > 0.0 and random.random() < eval_epsilon:
                     act = random.randrange(self.env.action_size)
@@ -192,11 +240,15 @@ class Agent(object):
                     act = self._select_action(test_mode=True)
 
                 action_counts[act] = action_counts.get(act, 0) + 1
-
                 screen, reward, terminal = self.env.act(act, is_train=False)
+
                 self.hist.add(screen)
                 current_reward += reward
                 current_screen_hist.append(self.env.screen)
+
+                new_lives = self.env._env.unwrapped.ale.lives()
+                if new_lives < lives:
+                    lives = new_lives
 
             rewards.append(current_reward)
             print(f"Episode reward: {current_reward} | actions: {action_counts}")
@@ -205,31 +257,25 @@ class Agent(object):
                 best_reward = current_reward
                 best_screen_hist = current_screen_hist
 
-        # 6) Tính thống kê
+        # Summary
         rewards_np = np.array(rewards, dtype=np.float32)
-        avg_reward = float(np.mean(rewards_np))
-        median_reward = float(np.median(rewards_np))
-        std_reward = float(np.std(rewards_np))
-
         print(f"\n[Summary over {num_ep} episodes]")
         print(f" Best reward  : {best_reward}")
-        print(f" Average      : {avg_reward:.2f}")
-        print(f" Median       : {median_reward:.2f}")
-        print(f" Std          : {std_reward:.2f}")
+        print(f" Average      : {float(np.mean(rewards_np)):.2f}")
+        print(f" Median       : {float(np.median(rewards_np)):.2f}")
+        print(f" Std          : {float(np.std(rewards_np)):.2f}")
 
-        # 7) Xuất GIF episode có reward cao nhất
-        out_path = f'best_{int(best_reward)}.gif'
+        # Save GIF
         if best_screen_hist:
+            out_path = f'best_{int(best_reward)}.gif'
             imageio.mimsave(out_path, best_screen_hist, duration=0.0001)
             print(f'Saved GIF to {out_path}')
-        else:
-            print("[play] No frames captured; GIF not saved.")
 
         return {
             "best": best_reward,
-            "average": avg_reward,
-            "median": median_reward,
-            "std": std_reward,
+            "average": float(np.mean(rewards_np)),
+            "median": float(np.median(rewards_np)),
+            "std": float(np.std(rewards_np)),
             "all_rewards": rewards
         }
 
@@ -240,7 +286,7 @@ class Agent(object):
         batch_obs_t_1 = self._to_tensor(sc_t_1, requires_grad=False)
         batch_rewards = torch.from_numpy(rewards).to(device).float().unsqueeze(1)
         batch_actions = torch.from_numpy(actions).to(device).long().unsqueeze(1)
-        batch_nonterminal = torch.from_numpy(1.0 - terminals).to(device).float().unsqueeze(1)
+        batch_nonterminal = torch.from_numpy((~terminals).astype(np.float32)).to(device).unsqueeze(1)
 
         q_values_all = self.q(batch_obs_t)
         q_values = q_values_all.gather(1, batch_actions)
@@ -323,9 +369,7 @@ class Agent(object):
             _ = self.hist.reset   # reset history
 
             # start new game
-            screen, reward, action, terminal = self.env.new_random_game(force=True)
-            for _ in range(self.env._history):
-                self.hist.add(screen)
+            screen, reward, action, terminal = self._reset_and_fill_history()
                 # LƯU initial frames vào play_mem (giữ nguyên format)
                 # Lưu initial frames as transitions with action 0 and reward 0 is optional;
                 # Nhưng để đầy đủ, ta không ghi action/reward ở frame khởi tạo.
@@ -343,14 +387,12 @@ class Agent(object):
                     self.hist.add(screen)
                     # lưu transition (fire warmup) vào play_mem
                     try:
-                        play_mem.add(screen, float(np.clip(r, -1.0, 1.0)), int(fire_action), float(bool(terminal)))
+                        play_mem.add(screen, float(np.clip(r, -1.0, 1.0)), int(fire_action), bool(terminal))
                     except Exception:
                         # nếu play_mem đầy thì ngắt lưu (play_mem giới hạn)
                         pass
                     if terminal:
-                        screen, reward, action, terminal = self.env.new_random_game(force=True)
-                        for _ in range(self.env._history):
-                            self.hist.add(screen)
+                        screen, reward, action, terminal = self._reset_and_fill_history()
                         break
 
             current_reward = 0.0
@@ -371,7 +413,7 @@ class Agent(object):
 
                 # LƯU transition vào play_mem
                 try:
-                    play_mem.add(screen, float(np.clip(reward, -1.0, 1.0)), int(act), float(bool(terminal)))
+                    play_mem.add(screen, float(np.clip(reward, -1.0, 1.0)), int(act), bool(terminal))
                 except Exception:
                     # Nếu buffer đã đầy (capacity nhỏ), ta chỉ bỏ qua thêm transition
                     pass
@@ -463,7 +505,7 @@ class Agent(object):
             files = sorted([f for f in os.listdir(buffer_dir) if f.endswith(".npz")])
 
             if not files:
-                print("⚠️ Không tìm thấy file .npz nào trong thư mục!")
+                print("Không tìm thấy file .npz nào trong thư mục!")
             else:
                 for f in files:
                     path = os.path.join(buffer_dir, f)

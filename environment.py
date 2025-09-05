@@ -48,8 +48,9 @@ class Environment(object):
         """Reset and perform random number of NOOP actions (1–30)"""
         if self.lives == 0 or force:
             obs, info = self._env.reset()
-            if self._fire_action is not None and "FIRE" in self._action_meanings:
-                obs, _, _, _, _ = self._env.step(self._fire_action)
+            # Bỏ bước FIRE ở đây
+            # if self._fire_action is not None and "FIRE" in self._action_meanings:
+            #     obs, _, _, _, _ = self._env.step(self._fire_action)
 
         noops = random.randint(1, 30)
         for _ in range(noops):
@@ -100,7 +101,7 @@ class ReplayMemory(object):
         self._actions = np.empty(self._capacity, dtype=np.int32)
         self._rewards = np.empty(self._capacity, dtype=np.float32)
         self._screens = np.empty((self._capacity, self._height, self._width), dtype=np.float32)
-        self._terminals = np.empty(self._capacity, dtype=np.float32)
+        self._terminals = np.empty(self._capacity, dtype=bool)
         self._count = 0
         self._current = 0
         self._prestat = np.empty((self._batch_size, self._history, self._height, self._width), dtype=np.float32)

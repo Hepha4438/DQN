@@ -7,11 +7,6 @@ class DQN(nn.Module):
     """ Deep Q Network (Atari-style) """
 
     def __init__(self, num_history=4, num_actions=18, input_size=(84, 84)):
-        """
-        num_history: số frame stack (thường = 4)
-        num_actions: số action trong env
-        input_size: (H, W) của ảnh đầu vào sau preprocess
-        """
         super(DQN, self).__init__()
         self.conv1 = nn.Conv2d(num_history, 32, kernel_size=8, stride=4)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)

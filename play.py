@@ -1,3 +1,4 @@
+""" Play models in a dir"""
 import argparse
 import torch
 import os
@@ -39,9 +40,9 @@ if __name__ == '__main__':
     parser.add_argument("--learn_start", type=int, default=50000)
     parser.add_argument("--ep_start", type=float, default=1.0)
     parser.add_argument("--ep_end", type=float, default=0.1)
-    parser.add_argument("--models_dir", type=str, default="models(1)",
+    parser.add_argument("--models_dir", type=str, default="models",
                         help="Directory containing trained models")
-    parser.add_argument("--num_ep", type=int, default=75,
+    parser.add_argument("--num_ep", type=int, default=100,
                         help="Number of episodes to play per model")
     parser.add_argument("--result_file", type=str, default="results.txt",
                         help="File to save evaluation results")
