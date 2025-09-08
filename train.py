@@ -29,7 +29,7 @@ if __name__ == '__main__':
     parser.add_argument("--width", type=int, default=84)
     parser.add_argument("--height", type=int, default=84)
     parser.add_argument("--history", type=int, default=4)
-    parser.add_argument("--mem_capacity", type=int, default=500000)
+    parser.add_argument("--mem_capacity", type=int, default=750000)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--train_freq", type=int, default=4)
     parser.add_argument("--update_freq", type=int, default=10000)

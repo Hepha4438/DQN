@@ -47,23 +47,14 @@ class Agent(object):
         self.optim = torch.optim.RMSprop(self.q.parameters(), lr=0.00025, alpha=0.95, eps=0.01)
 
     def _reset_and_fill_history(self, target_lives=5):
-        # 1. Reset game KHÔNG tự FIRE trong Environment
         screen, reward, action, terminal = self.env.new_random_game(force=True)
 
-        # 2. Reset history ngay lập tức, điền frame tĩnh
+        # reset history and fill with the *current* screen (post-fire)
         _ = self.hist.reset
         for _ in range(self.env._history):
             self.hist.add(screen)
 
-        # 3. FIRE bóng để bắt đầu game
-        if self.env._fire_action is not None:
-            screen, reward, terminal = self.env.act(self.env._fire_action)
-
-        # 4. Thêm frame hiện tại vào history sau FIRE
-        self.hist.add(screen)
-
-        return screen, reward, self.env._fire_action, terminal
-
+        return screen, reward, action, terminal
 
     def train(self):
         # Reset game đầu tiên
@@ -171,6 +162,7 @@ class Agent(object):
             if self.step % self._update_freq == self._update_freq - 1:
                 self.target_q.load_state_dict(self.q.state_dict())
                 if self.step % (self._update_freq * 10) == (self._update_freq * 10) - 1:
+                    os.makedirs("models", exist_ok=True)
                     torch.save(self.target_q.state_dict(), f'models/model_{self.step}.pt')
 
     def _load_model_checkpoint(self, model_path):
@@ -286,7 +278,7 @@ class Agent(object):
         batch_obs_t_1 = self._to_tensor(sc_t_1, requires_grad=False)
         batch_rewards = torch.from_numpy(rewards).to(device).float().unsqueeze(1)
         batch_actions = torch.from_numpy(actions).to(device).long().unsqueeze(1)
-        batch_nonterminal = torch.from_numpy((~terminals).astype(np.float32)).to(device).unsqueeze(1)
+        batch_nonterminal = torch.from_numpy((1.0 - terminals.astype(np.float32))).to(device).unsqueeze(1)
 
         q_values_all = self.q(batch_obs_t)
         q_values = q_values_all.gather(1, batch_actions)

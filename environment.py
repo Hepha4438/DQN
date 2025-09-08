@@ -4,6 +4,7 @@ import ale_py
 import numpy as np
 import random
 from skimage import color, transform
+import warnings
 
 
 class Environment(object):
@@ -42,26 +43,45 @@ class Environment(object):
     def lives(self):
         if hasattr(self._env, "ale"):
             return self._env.ale.lives()
+        warnings.warn("Env has no ALE interface, returning lives=0", RuntimeWarning)
         return 0
 
     def new_random_game(self, force=False):
-        """Reset and perform random number of NOOP actions (1–30)"""
         if self.lives == 0 or force:
             obs, info = self._env.reset()
-            # Bỏ bước FIRE ở đây
-            # if self._fire_action is not None and "FIRE" in self._action_meanings:
-            #     obs, _, _, _, _ = self._env.step(self._fire_action)
+            self._screen_ori = obs
+            self._screen = transform.resize(obs, [self._height, self._width])
+            self._screen = color.rgb2gray(self._screen)
+            self._terminal = False
 
         noops = random.randint(1, 30)
         for _ in range(noops):
             self._step(self._noop_action)
             if self._terminal:
                 obs, info = self._env.reset()
+                self._screen_ori = obs
+                self._screen = transform.resize(obs, [self._height, self._width])
+                self._screen = color.rgb2gray(self._screen)
+                self._terminal = False
+
+        # FIRE to start ball if required (Breakout)
+        if self._fire_action is not None:
+            self._step(self._fire_action)
+            if self._terminal:
+                obs, info = self._env.reset()
+                self._screen_ori = obs
+                self._screen = transform.resize(obs, [self._height, self._width])
+                self._screen = color.rgb2gray(self._screen)
+                self._terminal = False
 
         return self._screen, 0, 0, self._terminal
 
     def act(self, action, is_train=True):
+        start_lives = self.lives
         self._step(action)
+        if is_train and start_lives > self.lives:
+            self._reward -= 1.0
+            self._terminal = True
         return self.state
 
     def _step(self, action):

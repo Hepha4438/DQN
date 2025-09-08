@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument("--learn_start", type=int, default=50000)
     parser.add_argument("--ep_start", type=float, default=1.0)
     parser.add_argument("--ep_end", type=float, default=0.1)
-    parser.add_argument("--model_path", type=str, default="models_Breakout_50M/model_44999999.pt",
+    parser.add_argument("--model_path", type=str, default="models/model_30799999.pt",
                         help="Path to the trained model")
     parser.add_argument("--num_ep", type=int, default=200,
                         help="Number of episodes to play")
